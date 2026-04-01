@@ -9,9 +9,11 @@ from datetime import datetime
 BOT_TOKEN = '8381032154:AAEQdqCbxcGOuzunPWhPZbXaCjzaPpJbuhM'
 ADMIN_ID = 5298604296
 BOT_USERNAME = 'kinoo_fiilm_bot'
-OMDB_API_KEY = '49b5b1d6'  # Бесплатный ключ
+TMDB_API_KEY = 'fdc70aa152320f85d8acdfda64b69b36'  # Твой ключ
 
 bot = telebot.TeleBot(BOT_TOKEN)
+TMDB_URL = 'https://api.themoviedb.org/3'
+IMAGE_URL = 'https://image.tmdb.org/t/p/w500'
 
 # ========== БАЗА ДАННЫХ ==========
 def init_db():
@@ -57,26 +59,47 @@ init_db()
 
 # ========== ПОИСК ФИЛЬМА ==========
 def search_movie(query):
-    """Поиск фильма через OMDb API"""
+    """Поиск фильма через TMDb"""
     try:
-        url = f"http://www.omdbapi.com/?t={query}&apikey={OMDB_API_KEY}&plot=full"
-        r = requests.get(url, timeout=10)
+        url = f"{TMDB_URL}/search/movie"
+        params = {
+            'api_key': TMDB_API_KEY,
+            'query': query,
+            'language': 'ru-RU',
+            'page': 1
+        }
+        r = requests.get(url, params=params, timeout=10)
         data = r.json()
         
-        if data.get('Response') == 'False':
+        results = data.get('results', [])
+        if not results:
             return None
         
+        first = results[0]
         return {
-            'name': data.get('Title', 'Без названия'),
-            'year': data.get('Year', '—'),
-            'rating': float(data.get('imdbRating', 0)),
-            'description': data.get('Plot', 'Описание отсутствует'),
-            'poster': data.get('Poster'),
-            'actors': data.get('Actors', ''),
-            'genre': data.get('Genre', '')
+            'id': first.get('id'),
+            'name': first.get('title', 'Без названия'),
+            'year': first.get('release_date', '')[:4] if first.get('release_date') else '—',
+            'rating': first.get('vote_average', 0),
+            'description': first.get('overview', 'Описание отсутствует'),
+            'poster': f"{IMAGE_URL}{first.get('poster_path')}" if first.get('poster_path') else None
         }
     except Exception as e:
         print(f"Ошибка: {e}")
+        return None
+
+def get_movie_details(movie_id):
+    """Получить детали фильма (актёры, жанры)"""
+    try:
+        url = f"{TMDB_URL}/movie/{movie_id}"
+        params = {
+            'api_key': TMDB_API_KEY,
+            'language': 'ru-RU',
+            'append_to_response': 'credits'
+        }
+        r = requests.get(url, params=params, timeout=10)
+        return r.json()
+    except:
         return None
 
 def get_watch_link(title):
@@ -140,21 +163,29 @@ def do_search(message):
         bot.send_message(message.chat.id, "❌ Фильм не найден. Попробуй другой запрос.")
         return
     
+    # Получаем детали
+    details = get_movie_details(movie['id'])
+    
     name = movie['name']
     year = movie['year']
     rating = movie['rating']
     description = movie['description']
     poster = movie['poster']
-    actors = movie['actors']
-    genre = movie['genre']
+    
+    genres = ''
+    actors = ''
+    if details:
+        genres = ', '.join([g['name'] for g in details.get('genres', [])])
+        actors_list = [a['name'] for a in details.get('credits', {}).get('cast', [])[:3]]
+        actors = ', '.join(actors_list) if actors_list else ''
     
     stars = get_stars(rating)
     watch_link = get_watch_link(name)
     
     text = f"🎬 *{name}* ({year})\n\n"
     text += f"⭐ *Рейтинг:* {rating}/10 {stars}\n"
-    if genre:
-        text += f"🎭 *Жанр:* {genre}\n"
+    if genres:
+        text += f"🎭 *Жанр:* {genres}\n"
     if actors:
         text += f"🎭 *В ролях:* {actors}\n\n"
     text += f"📖 *Описание:*\n{description[:500]}..."
@@ -162,7 +193,7 @@ def do_search(message):
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🎬 Смотреть бесплатно", url=watch_link))
     
-    if poster and poster != 'N/A':
+    if poster:
         bot.send_photo(message.chat.id, poster, caption=text, reply_markup=markup, parse_mode='Markdown')
     else:
         bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='Markdown')
