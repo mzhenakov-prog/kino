@@ -9,7 +9,7 @@ from datetime import datetime
 BOT_TOKEN = '8381032154:AAEQdqCbxcGOuzunPWhPZbXaCjzaPpJbuhM'
 ADMIN_ID = 5298604296
 BOT_USERNAME = 'kinoo_fiilm_bot'
-TMDB_API_KEY = 'f3c7c5d5e6b8a9c1d2e3f4g5h6i7j8k9'  # Мой рабочий ключ
+TMDB_API_KEY = 'fdc70aa152320f85d8acdfda64b69b36'  # Твой ключ
 
 bot = telebot.TeleBot(BOT_TOKEN)
 TMDB_URL = 'https://api.themoviedb.org/3'
@@ -57,7 +57,7 @@ def delete_ref_link(code):
 
 init_db()
 
-# ========== ПОИСК ==========
+# ========== ПОИСК ФИЛЬМА ==========
 def search_movie(query):
     try:
         url = f"{TMDB_URL}/search/movie"
