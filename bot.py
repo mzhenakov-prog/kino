@@ -9,10 +9,9 @@ from datetime import datetime
 BOT_TOKEN = '8381032154:AAEQdqCbxcGOuzunPWhPZbXaCjzaPpJbuhM'
 ADMIN_ID = 5298604296
 BOT_USERNAME = 'kinoo_fiilm_bot'
-KINOPOISK_API_KEY = 'bdb7430d-d2f2-49cd-a884-744df1085261'
+OMDB_API_KEY = '49b5b1d6'  # Бесплатный ключ
 
 bot = telebot.TeleBot(BOT_TOKEN)
-KINOPOISK_URL = 'https://kinopoiskapiunofficial.tech/api'
 
 # ========== БАЗА ДАННЫХ ==========
 def init_db():
@@ -56,48 +55,35 @@ def delete_ref_link(code):
 
 init_db()
 
-# ========== ПОИСК ФИЛЬМОВ ==========
+# ========== ПОИСК ФИЛЬМА ==========
 def search_movie(query):
-    """Поиск фильма по названию"""
+    """Поиск фильма через OMDb API"""
     try:
-        headers = {'X-API-KEY': KINOPOISK_API_KEY}
-        params = {'keyword': query, 'page': 1}
-        url = f"{KINOPOISK_URL}/v2.1/films/search-by-keyword"
-        r = requests.get(url, headers=headers, params=params, timeout=10)
+        url = f"http://www.omdbapi.com/?t={query}&apikey={OMDB_API_KEY}&plot=full"
+        r = requests.get(url, timeout=10)
         data = r.json()
         
-        films = data.get('films', [])
-        if films:
-            first = films[0]
-            return {
-                'id': first.get('filmId'),
-                'name': first.get('nameRu') or first.get('nameEn', 'Без названия'),
-                'year': first.get('year', '—'),
-                'rating': first.get('rating', 0),
-                'description': first.get('description', 'Описание отсутствует'),
-                'poster': first.get('posterUrl')
-            }
-        return None
+        if data.get('Response') == 'False':
+            return None
+        
+        return {
+            'name': data.get('Title', 'Без названия'),
+            'year': data.get('Year', '—'),
+            'rating': float(data.get('imdbRating', 0)),
+            'description': data.get('Plot', 'Описание отсутствует'),
+            'poster': data.get('Poster'),
+            'actors': data.get('Actors', ''),
+            'genre': data.get('Genre', '')
+        }
     except Exception as e:
         print(f"Ошибка: {e}")
         return None
 
-def get_movie_details(movie_id):
-    """Получить полную информацию о фильме по ID"""
-    try:
-        headers = {'X-API-KEY': KINOPOISK_API_KEY}
-        url = f"{KINOPOISK_URL}/v2.2/films/{movie_id}"
-        r = requests.get(url, headers=headers, timeout=10)
-        return r.json()
-    except:
-        return None
-
 def get_watch_link(title):
-    """Ссылка на бесплатный просмотр"""
+    """Ссылка на Кинопоиск"""
     return f"https://www.kinopoisk.ru/index.php?kp_query={title.replace(' ', '+')}"
 
 def get_stars(rating):
-    """Преобразует рейтинг в звёзды"""
     if rating <= 0:
         return "Нет рейтинга"
     stars = int((rating / 2) + 0.5)
@@ -134,7 +120,7 @@ def start(message):
     is_admin = (uid == ADMIN_ID)
     welcome = """🎥 *КИНО БОТ*
 
-Введи название фильма или сериала — я покажу описание, рейтинг и дам ссылку на бесплатный просмотр!
+Введи название фильма — я покажу описание, рейтинг и дам ссылку на бесплатный просмотр!
 
 По вопросам: @avgustc"""
     
@@ -142,7 +128,7 @@ def start(message):
 
 @bot.message_handler(func=lambda m: m.text == "🔍 Поиск фильмов")
 def search_cmd(message):
-    bot.send_message(message.chat.id, "🔍 *Введи название фильма или сериала*", parse_mode='Markdown')
+    bot.send_message(message.chat.id, "🔍 *Введи название фильма*", parse_mode='Markdown')
     bot.register_next_step_handler(message, do_search)
 
 def do_search(message):
@@ -154,39 +140,29 @@ def do_search(message):
         bot.send_message(message.chat.id, "❌ Фильм не найден. Попробуй другой запрос.")
         return
     
-    # Получаем дополнительные детали
-    details = get_movie_details(movie['id'])
-    
     name = movie['name']
     year = movie['year']
     rating = movie['rating']
     description = movie['description']
     poster = movie['poster']
-    
-    # Если есть детали — берём актёров и жанры
-    genres = ''
-    actors = ''
-    if details:
-        genres = ', '.join([g['genre'] for g in details.get('genres', [])])
-        actors_list = [a['nameRu'] for a in details.get('actors', [])[:3]]
-        actors = ', '.join(actors_list) if actors_list else ''
+    actors = movie['actors']
+    genre = movie['genre']
     
     stars = get_stars(rating)
     watch_link = get_watch_link(name)
     
     text = f"🎬 *{name}* ({year})\n\n"
     text += f"⭐ *Рейтинг:* {rating}/10 {stars}\n"
-    if genres:
-        text += f"🎭 *Жанр:* {genres}\n"
+    if genre:
+        text += f"🎭 *Жанр:* {genre}\n"
     if actors:
         text += f"🎭 *В ролях:* {actors}\n\n"
     text += f"📖 *Описание:*\n{description[:500]}..."
     
-    # Кнопка "Смотреть бесплатно"
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🎬 Смотреть бесплатно", url=watch_link))
     
-    if poster:
+    if poster and poster != 'N/A':
         bot.send_photo(message.chat.id, poster, caption=text, reply_markup=markup, parse_mode='Markdown')
     else:
         bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='Markdown')
@@ -206,14 +182,9 @@ def help_cmd(message):
 🔍 *Поиск фильмов* — введи название
 ❓ *Помощь* — это сообщение
 
-*Как пользоваться:*
-1. Нажми "Поиск фильмов"
-2. Введи название
-3. Получи описание, рейтинг и ссылку на бесплатный просмотр
-
 @avgustc"""
     if is_admin:
-        help_text += "\n\n🔗 Рефералка — создавай ссылки"
+        help_text += "\n\n🔗 Рефералка"
     bot.send_message(message.chat.id, help_text, reply_markup=main_menu(is_admin), parse_mode='Markdown')
 
 # ========== РЕФЕРАЛЬНЫЕ КНОПКИ ==========
@@ -221,7 +192,7 @@ def help_cmd(message):
 def create_ref(call):
     if call.from_user.id != ADMIN_ID:
         return
-    msg = bot.send_message(call.message.chat.id, "📝 *Введи название для ссылки*", parse_mode='Markdown')
+    msg = bot.send_message(call.message.chat.id, "📝 *Введи название*", parse_mode='Markdown')
     bot.register_next_step_handler(msg, save_ref)
 
 def save_ref(message):
@@ -229,7 +200,7 @@ def save_ref(message):
     code = f"ref_{int(time.time())}"
     add_ref_link(code, label)
     ref_link = f"https://t.me/{BOT_USERNAME}?start={code}"
-    bot.send_message(message.chat.id, f"✅ *Ссылка создана!*\n\n🔗 `{ref_link}`\n📌 {label}", parse_mode='Markdown')
+    bot.send_message(message.chat.id, f"✅ Ссылка: `{ref_link}`\n📌 {label}", parse_mode='Markdown')
 
 @bot.callback_query_handler(func=lambda call: call.data == "ref_list")
 def list_refs(call):
