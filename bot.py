@@ -58,7 +58,6 @@ init_db()
 
 # ========== ПОИСК ФИЛЬМОВ ==========
 def search_movies(query, limit=10):
-    """Поиск фильмов через Kinopoisk Unofficial API"""
     try:
         headers = {'X-API-KEY': KINOPOISK_API_KEY}
         params = {'keyword': query, 'page': 1}
@@ -68,22 +67,27 @@ def search_movies(query, limit=10):
         
         movies = []
         for item in data.get('films', [])[:limit]:
+            rating = item.get('rating', 0)
+            # Преобразуем рейтинг 0-10 в звёзды 1-5
+            stars = int((rating / 2) + 0.5) if rating > 0 else 0
+            stars_text = '⭐' * stars if stars > 0 else 'Нет рейтинга'
+            
             movies.append({
                 'id': item.get('filmId'),
                 'name': item.get('nameRu') or item.get('nameEn', 'Без названия'),
                 'year': item.get('year', '—'),
-                'rating': item.get('rating', 0),
+                'rating': rating,
+                'stars': stars_text,
                 'description': item.get('description', 'Описание отсутствует'),
                 'poster': item.get('posterUrl'),
                 'genres': [g['genre'] for g in item.get('genres', [])][:3]
             })
         return movies
     except Exception as e:
-        print(f"Ошибка поиска: {e}")
+        print(f"Ошибка: {e}")
         return []
 
 def get_movie_by_id(movie_id):
-    """Получить фильм по ID"""
     try:
         headers = {'X-API-KEY': KINOPOISK_API_KEY}
         url = f"{KINOPOISK_URL}/v2.2/films/{movie_id}"
@@ -92,55 +96,44 @@ def get_movie_by_id(movie_id):
     except:
         return None
 
-def get_top_movies():
-    """Топ-250 фильмов"""
-    try:
-        headers = {'X-API-KEY': KINOPOISK_API_KEY}
-        params = {'type': 'TOP_250_BEST', 'page': 1}
-        url = f"{KINOPOISK_URL}/v2.2/films/top"
-        r = requests.get(url, headers=headers, params=params, timeout=10)
-        data = r.json()
-        
-        movies = []
-        for item in data.get('films', [])[:10]:
-            movies.append({
-                'id': item.get('filmId'),
-                'name': item.get('nameRu') or item.get('nameEn', 'Без названия'),
-                'year': item.get('year', '—'),
-                'rating': item.get('rating', 0),
-                'poster': item.get('posterUrl')
-            })
-        return movies
-    except:
-        return []
-
 def get_premieres():
-    """Премьеры текущего года"""
+    """Премьеры текущего месяца"""
     try:
         headers = {'X-API-KEY': KINOPOISK_API_KEY}
-        params = {'year': datetime.now().year, 'month': 'APRIL'}
+        params = {'year': datetime.now().year, 'month': datetime.now().strftime('%B').upper()}
         url = f"{KINOPOISK_URL}/v2.2/films/premieres"
         r = requests.get(url, headers=headers, params=params, timeout=10)
         data = r.json()
         
         movies = []
         for item in data.get('items', [])[:10]:
+            rating = item.get('rating', 0)
+            stars = int((rating / 2) + 0.5) if rating > 0 else 0
+            stars_text = '⭐' * stars if stars > 0 else 'Нет рейтинга'
+            
             movies.append({
                 'id': item.get('filmId'),
                 'name': item.get('nameRu') or item.get('nameEn', 'Без названия'),
                 'year': item.get('year', '—'),
-                'rating': item.get('rating', 0),
-                'poster': item.get('posterUrl')
+                'rating': rating,
+                'stars': stars_text,
+                'description': item.get('description', 'Описание отсутствует'),
+                'poster': item.get('posterUrl'),
+                'genres': [g['genre'] for g in item.get('genres', [])][:3]
             })
         return movies
     except:
         return []
 
+def get_watch_link(title):
+    """Генерирует ссылку на бесплатный просмотр"""
+    # Поисковая ссылка на Кинопоиск
+    return f"https://www.kinopoisk.ru/index.php?kp_query={title.replace(' ', '+')}"
+
 # ========== КНОПКИ ==========
 def main_menu(is_admin=False):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("🔍 Поиск фильмов", "🏆 Топ 250")
-    markup.add("🎬 Премьеры", "⭐ Популярное")
+    markup.add("🔍 Поиск фильмов", "🎬 Премьеры")
     if is_admin:
         markup.add("🔗 Рефералка")
     markup.add("❓ Помощь")
@@ -161,8 +154,7 @@ def movie_buttons(movies, page=0, per_page=5):
     for movie in page_movies:
         name = movie['name'][:40]
         year = movie['year'] if movie['year'] else '—'
-        rating = f"⭐ {movie['rating']}" if movie.get('rating') else ''
-        markup.add(types.InlineKeyboardButton(f"🎬 {name} ({year}) {rating}", callback_data=f"movie_{movie['id']}"))
+        markup.add(types.InlineKeyboardButton(f"🎬 {name} ({year})", callback_data=f"movie_{movie['id']}"))
     
     nav = []
     if page > 0:
@@ -191,15 +183,13 @@ def start(message):
     add_user(uid, uname, ref_code)
     
     is_admin = (uid == ADMIN_ID)
-    welcome = """🎥 *КИНО БОТ* | Фильмы | Сериалы
+    welcome = """🎥 *КИНО БОТ*
 
 Найди любой фильм или сериал!
 
 *Возможности:*
 🔍 Поиск фильмов
-🏆 Топ 250 лучших
 🎬 Премьеры
-⭐ Популярное
 
 По вопросам: @avgustc"""
     
@@ -207,7 +197,7 @@ def start(message):
 
 @bot.message_handler(func=lambda m: m.text == "🔍 Поиск фильмов")
 def search_cmd(message):
-    bot.send_message(message.chat.id, "🔍 *Введи название фильма*", parse_mode='Markdown')
+    bot.send_message(message.chat.id, "🔍 *Введи название фильма или сериала*", parse_mode='Markdown')
     bot.register_next_step_handler(message, do_search)
 
 def do_search(message):
@@ -223,19 +213,6 @@ def do_search(message):
     markup, _ = movie_buttons(movies, 0)
     bot.send_message(message.chat.id, f"🎬 *Результаты:* {message.text}", reply_markup=markup, parse_mode='Markdown')
 
-@bot.message_handler(func=lambda m: m.text == "🏆 Топ 250")
-def top_cmd(message):
-    wait = bot.send_message(message.chat.id, "🔎 *Загружаю топ...*", parse_mode='Markdown')
-    movies = get_top_movies()
-    bot.delete_message(message.chat.id, wait.message_id)
-    
-    if movies:
-        user_data[message.chat.id] = {'movies': movies, 'query': "🏆 Топ 250"}
-        markup, _ = movie_buttons(movies, 0)
-        bot.send_message(message.chat.id, "🏆 *Топ 250 лучших фильмов*", reply_markup=markup, parse_mode='Markdown')
-    else:
-        bot.send_message(message.chat.id, "❌ Не удалось загрузить топ.")
-
 @bot.message_handler(func=lambda m: m.text == "🎬 Премьеры")
 def premiere_cmd(message):
     wait = bot.send_message(message.chat.id, "🔎 *Загружаю премьеры...*", parse_mode='Markdown')
@@ -245,22 +222,9 @@ def premiere_cmd(message):
     if movies:
         user_data[message.chat.id] = {'movies': movies, 'query': "🎬 Премьеры"}
         markup, _ = movie_buttons(movies, 0)
-        bot.send_message(message.chat.id, "🎬 *Скоро в прокате*", reply_markup=markup, parse_mode='Markdown')
+        bot.send_message(message.chat.id, "🎬 *Премьеры месяца*", reply_markup=markup, parse_mode='Markdown')
     else:
         bot.send_message(message.chat.id, "❌ Не удалось загрузить премьеры.")
-
-@bot.message_handler(func=lambda m: m.text == "⭐ Популярное")
-def popular_cmd(message):
-    wait = bot.send_message(message.chat.id, "🔎 *Загружаю популярное...*", parse_mode='Markdown')
-    movies = get_top_movies()
-    bot.delete_message(message.chat.id, wait.message_id)
-    
-    if movies:
-        user_data[message.chat.id] = {'movies': movies, 'query': "⭐ Популярное"}
-        markup, _ = movie_buttons(movies, 0)
-        bot.send_message(message.chat.id, "⭐ *Популярные фильмы*", reply_markup=markup, parse_mode='Markdown')
-    else:
-        bot.send_message(message.chat.id, "❌ Не удалось загрузить.")
 
 @bot.message_handler(func=lambda m: m.text == "🔗 Рефералка")
 def ref_cmd(message):
@@ -274,14 +238,18 @@ def help_cmd(message):
     is_admin = (message.from_user.id == ADMIN_ID)
     help_text = """🎥 *Кино бот*
 
-🔍 Поиск фильмов
-🏆 Топ 250
-🎬 Премьеры
-⭐ Популярное
+🔍 *Поиск фильмов* — введи название
+🎬 *Премьеры* — новинки месяца
+
+*Как пользоваться:*
+1. Нажми "Поиск фильмов"
+2. Введи название
+3. Выбери фильм из списка
+4. Получи описание, рейтинг и ссылку
 
 @avgustc"""
     if is_admin:
-        help_text += "\n\n🔗 Рефералка"
+        help_text += "\n\n🔗 Рефералка — создавай ссылки"
     bot.send_message(message.chat.id, help_text, reply_markup=main_menu(is_admin), parse_mode='Markdown')
 
 # ========== CALLBACK ==========
@@ -303,7 +271,7 @@ def show_movie(call):
     
     movie = get_movie_by_id(movie_id)
     if not movie:
-        bot.send_message(call.message.chat.id, "❌ Ошибка")
+        bot.send_message(call.message.chat.id, "❌ Ошибка загрузки фильма.")
         return
     
     name = movie.get('nameRu') or movie.get('nameEn', 'Без названия')
@@ -313,7 +281,19 @@ def show_movie(call):
     genres = ', '.join([g['genre'] for g in movie.get('genres', [])])
     poster = movie.get('posterUrl')
     
-    text = f"🎬 *{name}* ({year})\n⭐ {rating}/10\n🎭 {genres}\n\n📖 {description[:500]}..."
+    # Преобразуем рейтинг в звёзды
+    stars = int((rating / 2) + 0.5) if rating > 0 else 0
+    stars_text = '⭐' * stars if stars > 0 else 'Нет рейтинга'
+    
+    # Ссылка на бесплатный просмотр
+    watch_link = get_watch_link(name)
+    
+    text = f"🎬 *{name}* ({year})\n\n"
+    text += f"⭐ *Рейтинг:* {rating}/10 ({stars_text})\n"
+    if genres:
+        text += f"🎭 *Жанр:* {genres}\n\n"
+    text += f"📖 *Описание:*\n{description[:400]}...\n\n"
+    text += f"🔗 *Смотреть бесплатно:* [Кинопоиск]({watch_link})"
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🔙 Назад к списку", callback_data="back_to_list"))
@@ -354,7 +334,7 @@ def list_refs(call):
         return
     links = get_ref_links()
     if not links:
-        bot.send_message(call.message.chat.id, "📭 *Нет созданных ссылок*", parse_mode='Markdown')
+        bot.send_message(call.message.chat.id, "📭 *Нет ссылок*", parse_mode='Markdown')
         return
     markup = types.InlineKeyboardMarkup(row_width=1)
     for code, label, clicks, created in links:
@@ -371,7 +351,7 @@ def show_ref_stats(call):
     for c, label, clicks, created in links:
         if c == code:
             ref_link = f"https://t.me/{BOT_USERNAME}?start={code}"
-            text = f"📊 *Статистика ссылки*\n\n📌 {label}\n🔗 `{ref_link}`\n👥 Переходов: {clicks}\n📅 Создана: {created}"
+            text = f"📊 *Статистика*\n\n📌 {label}\n🔗 `{ref_link}`\n👥 {clicks}\n📅 {created}"
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🗑 Удалить", callback_data=f"del_{code}"))
             markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="ref_list"))
@@ -385,8 +365,8 @@ def delete_ref(call):
         return
     code = call.data[4:]
     delete_ref_link(code)
-    bot.answer_callback_query(call.id, "✅ Ссылка удалена!")
-    bot.edit_message_text("🗑 Ссылка удалена", call.message.chat.id, call.message.message_id)
+    bot.answer_callback_query(call.id, "✅ Удалено!")
+    bot.edit_message_text("🗑 Удалено", call.message.chat.id, call.message.message_id)
 
 @bot.callback_query_handler(func=lambda call: call.data == "back_to_ref")
 def back_to_ref(call):
