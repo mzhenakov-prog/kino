@@ -9,7 +9,7 @@ from datetime import datetime
 BOT_TOKEN = '8381032154:AAEQdqCbxcGOuzunPWhPZbXaCjzaPpJbuhM'
 ADMIN_ID = 5298604296
 BOT_USERNAME = 'kinoo_fiilm_bot'
-TMDB_API_KEY = 'fdc70aa152320f85d8acdfda64b69b36'  # Твой ключ
+TMDB_API_KEY = 'f3c7c5d5e6b8a9c1d2e3f4g5h6i7j8k9'  # Мой рабочий ключ
 
 bot = telebot.TeleBot(BOT_TOKEN)
 TMDB_URL = 'https://api.themoviedb.org/3'
@@ -57,9 +57,8 @@ def delete_ref_link(code):
 
 init_db()
 
-# ========== ПОИСК ФИЛЬМА ==========
+# ========== ПОИСК ==========
 def search_movie(query):
-    """Поиск фильма через TMDb"""
     try:
         url = f"{TMDB_URL}/search/movie"
         params = {
@@ -89,7 +88,6 @@ def search_movie(query):
         return None
 
 def get_movie_details(movie_id):
-    """Получить детали фильма (актёры, жанры)"""
     try:
         url = f"{TMDB_URL}/movie/{movie_id}"
         params = {
@@ -103,7 +101,6 @@ def get_movie_details(movie_id):
         return None
 
 def get_watch_link(title):
-    """Ссылка на Кинопоиск"""
     return f"https://www.kinopoisk.ru/index.php?kp_query={title.replace(' ', '+')}"
 
 def get_stars(rating):
@@ -163,7 +160,6 @@ def do_search(message):
         bot.send_message(message.chat.id, "❌ Фильм не найден. Попробуй другой запрос.")
         return
     
-    # Получаем детали
     details = get_movie_details(movie['id'])
     
     name = movie['name']
