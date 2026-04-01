@@ -74,14 +74,22 @@ def search_movie(query):
         if not results:
             return None
         
-        first = results[0]
+        # Берём первый фильм (не документалку)
+        movie = None
+        for item in results:
+            if item.get('vote_average', 0) > 0 and not item.get('title', '').lower().startswith('изучение'):
+                movie = item
+                break
+        if not movie:
+            movie = results[0]
+        
         return {
-            'id': first.get('id'),
-            'name': first.get('title', 'Без названия'),
-            'year': first.get('release_date', '')[:4] if first.get('release_date') else '—',
-            'rating': first.get('vote_average', 0),
-            'description': first.get('overview', 'Описание отсутствует'),
-            'poster': f"{IMAGE_URL}{first.get('poster_path')}" if first.get('poster_path') else None
+            'id': movie.get('id'),
+            'name': movie.get('title', 'Без названия'),
+            'year': movie.get('release_date', '')[:4] if movie.get('release_date') else '—',
+            'rating': movie.get('vote_average', 0),
+            'description': movie.get('overview', 'Описание отсутствует'),
+            'poster': f"{IMAGE_URL}{movie.get('poster_path')}" if movie.get('poster_path') else None
         }
     except Exception as e:
         print(f"Ошибка: {e}")
