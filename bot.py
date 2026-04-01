@@ -57,7 +57,8 @@ def delete_ref_link(code):
 init_db()
 
 # ========== ПОИСК ФИЛЬМОВ ==========
-def search_movies(query, limit=10):
+def search_movies(query, limit=30):
+    """Поиск фильмов через Kinopoisk Unofficial API"""
     try:
         headers = {'X-API-KEY': KINOPOISK_API_KEY}
         params = {'keyword': query, 'page': 1}
@@ -67,27 +68,22 @@ def search_movies(query, limit=10):
         
         movies = []
         for item in data.get('films', [])[:limit]:
-            rating = item.get('rating', 0)
-            # Преобразуем рейтинг 0-10 в звёзды 1-5
-            stars = int((rating / 2) + 0.5) if rating > 0 else 0
-            stars_text = '⭐' * stars if stars > 0 else 'Нет рейтинга'
-            
             movies.append({
                 'id': item.get('filmId'),
                 'name': item.get('nameRu') or item.get('nameEn', 'Без названия'),
                 'year': item.get('year', '—'),
-                'rating': rating,
-                'stars': stars_text,
-                'description': item.get('description', 'Описание отсутствует'),
+                'rating': item.get('rating', 0),
+                'description': item.get('description', ''),
                 'poster': item.get('posterUrl'),
                 'genres': [g['genre'] for g in item.get('genres', [])][:3]
             })
         return movies
     except Exception as e:
-        print(f"Ошибка: {e}")
+        print(f"Ошибка поиска: {e}")
         return []
 
 def get_movie_by_id(movie_id):
+    """Получить полную информацию о фильме по ID"""
     try:
         headers = {'X-API-KEY': KINOPOISK_API_KEY}
         url = f"{KINOPOISK_URL}/v2.2/films/{movie_id}"
@@ -96,39 +92,38 @@ def get_movie_by_id(movie_id):
     except:
         return None
 
-def get_premieres():
-    """Премьеры текущего месяца"""
+def get_premieres(year=2026, page=1):
+    """Премьеры фильмов по годам"""
     try:
         headers = {'X-API-KEY': KINOPOISK_API_KEY}
-        params = {'year': datetime.now().year, 'month': datetime.now().strftime('%B').upper()}
+        params = {'year': year, 'page': page}
         url = f"{KINOPOISK_URL}/v2.2/films/premieres"
         r = requests.get(url, headers=headers, params=params, timeout=10)
         data = r.json()
         
         movies = []
-        for item in data.get('items', [])[:10]:
-            rating = item.get('rating', 0)
-            stars = int((rating / 2) + 0.5) if rating > 0 else 0
-            stars_text = '⭐' * stars if stars > 0 else 'Нет рейтинга'
-            
+        for item in data.get('items', []):
             movies.append({
                 'id': item.get('filmId'),
                 'name': item.get('nameRu') or item.get('nameEn', 'Без названия'),
                 'year': item.get('year', '—'),
-                'rating': rating,
-                'stars': stars_text,
-                'description': item.get('description', 'Описание отсутствует'),
-                'poster': item.get('posterUrl'),
-                'genres': [g['genre'] for g in item.get('genres', [])][:3]
+                'rating': item.get('rating', 0),
+                'poster': item.get('posterUrl')
             })
-        return movies
+        return movies, data.get('total', 0)
     except:
-        return []
+        return [], 0
 
 def get_watch_link(title):
-    """Генерирует ссылку на бесплатный просмотр"""
-    # Поисковая ссылка на Кинопоиск
+    """Ссылка на бесплатный просмотр"""
     return f"https://www.kinopoisk.ru/index.php?kp_query={title.replace(' ', '+')}"
+
+def get_stars(rating):
+    """Преобразует рейтинг в звёзды"""
+    if rating <= 0:
+        return "Нет рейтинга"
+    stars = int((rating / 2) + 0.5)
+    return '⭐' * stars
 
 # ========== КНОПКИ ==========
 def main_menu(is_admin=False):
@@ -145,16 +140,17 @@ def ref_menu():
     markup.add(types.InlineKeyboardButton("📊 Мои ссылки", callback_data="ref_list"))
     return markup
 
-def movie_buttons(movies, page=0, per_page=5):
+def movie_buttons(movies, page=0, per_page=10):
     start = page * per_page
     end = min(start + per_page, len(movies))
     page_movies = movies[start:end]
     
     markup = types.InlineKeyboardMarkup(row_width=1)
     for movie in page_movies:
-        name = movie['name'][:40]
+        name = movie['name'][:45]
         year = movie['year'] if movie['year'] else '—'
-        markup.add(types.InlineKeyboardButton(f"🎬 {name} ({year})", callback_data=f"movie_{movie['id']}"))
+        rating = get_stars(movie['rating'])
+        markup.add(types.InlineKeyboardButton(f"🎬 {name} ({year}) {rating}", callback_data=f"movie_{movie['id']}"))
     
     nav = []
     if page > 0:
@@ -166,8 +162,31 @@ def movie_buttons(movies, page=0, per_page=5):
     
     return markup, page_movies
 
+def premiere_buttons(movies, year, page, total_pages):
+    start = page * 10
+    end = min(start + 10, len(movies))
+    page_movies = movies[start:end]
+    
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for movie in page_movies:
+        name = movie['name'][:45]
+        year_val = movie['year'] if movie['year'] else '—'
+        rating = get_stars(movie['rating'])
+        markup.add(types.InlineKeyboardButton(f"🎬 {name} ({year_val}) {rating}", callback_data=f"premiere_{movie['id']}"))
+    
+    nav = []
+    if page > 0:
+        nav.append(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"premiere_page_{year}_{page-1}"))
+    if page < total_pages - 1:
+        nav.append(types.InlineKeyboardButton("➡️ Далее", callback_data=f"premiere_page_{year}_{page+1}"))
+    if nav:
+        markup.add(*nav)
+    
+    return markup, page_movies
+
 # ========== ДАННЫЕ ==========
 user_data = {}
+premiere_data = {}
 
 # ========== КОМАНДЫ ==========
 @bot.message_handler(commands=['start'])
@@ -189,7 +208,7 @@ def start(message):
 
 *Возможности:*
 🔍 Поиск фильмов
-🎬 Премьеры
+🎬 Премьеры 2025-2026
 
 По вопросам: @avgustc"""
     
@@ -202,29 +221,36 @@ def search_cmd(message):
 
 def do_search(message):
     wait = bot.send_message(message.chat.id, "🔎 *Ищу...*", parse_mode='Markdown')
-    movies = search_movies(message.text, limit=20)
+    movies = search_movies(message.text, limit=50)
     bot.delete_message(message.chat.id, wait.message_id)
     
     if not movies:
-        bot.send_message(message.chat.id, "❌ Ничего не найдено.")
+        bot.send_message(message.chat.id, "❌ Ничего не найдено. Попробуй другой запрос.")
         return
     
-    user_data[message.chat.id] = {'movies': movies, 'query': message.text}
+    user_data[message.chat.id] = {'movies': movies, 'query': message.text, 'type': 'search'}
     markup, _ = movie_buttons(movies, 0)
-    bot.send_message(message.chat.id, f"🎬 *Результаты:* {message.text}", reply_markup=markup, parse_mode='Markdown')
+    bot.send_message(message.chat.id, f"🎬 *Результаты поиска:* {message.text}", reply_markup=markup, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda m: m.text == "🎬 Премьеры")
 def premiere_cmd(message):
-    wait = bot.send_message(message.chat.id, "🔎 *Загружаю премьеры...*", parse_mode='Markdown')
-    movies = get_premieres()
-    bot.delete_message(message.chat.id, wait.message_id)
+    years = [2025, 2026]
+    all_movies = []
     
-    if movies:
-        user_data[message.chat.id] = {'movies': movies, 'query': "🎬 Премьеры"}
-        markup, _ = movie_buttons(movies, 0)
-        bot.send_message(message.chat.id, "🎬 *Премьеры месяца*", reply_markup=markup, parse_mode='Markdown')
-    else:
+    for year in years:
+        wait = bot.send_message(message.chat.id, f"🔎 *Загружаю премьеры {year} года...*", parse_mode='Markdown')
+        movies, total = get_premieres(year=year, page=1)
+        all_movies.extend(movies)
+        bot.delete_message(message.chat.id, wait.message_id)
+    
+    if not all_movies:
         bot.send_message(message.chat.id, "❌ Не удалось загрузить премьеры.")
+        return
+    
+    premiere_data[message.chat.id] = {'movies': all_movies, 'year': '2025-2026', 'page': 0}
+    total_pages = (len(all_movies) + 9) // 10
+    markup, _ = premiere_buttons(all_movies, '2025-2026', 0, total_pages)
+    bot.send_message(message.chat.id, f"🎬 *Премьеры 2025-2026* (стр. 1/{total_pages})", reply_markup=markup, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda m: m.text == "🔗 Рефералка")
 def ref_cmd(message):
@@ -239,13 +265,13 @@ def help_cmd(message):
     help_text = """🎥 *Кино бот*
 
 🔍 *Поиск фильмов* — введи название
-🎬 *Премьеры* — новинки месяца
+🎬 *Премьеры* — фильмы 2025-2026
 
 *Как пользоваться:*
 1. Нажми "Поиск фильмов"
 2. Введи название
 3. Выбери фильм из списка
-4. Получи описание, рейтинг и ссылку
+4. Получи описание, рейтинг, актёров и ссылку
 
 @avgustc"""
     if is_admin:
@@ -257,21 +283,37 @@ def help_cmd(message):
 def handle_movies_page(call):
     page = int(call.data.split('_')[2])
     data = user_data.get(call.message.chat.id)
-    if not data:
+    if not data or data.get('type') != 'search':
         bot.answer_callback_query(call.id, "❌ Устарело")
         return
     movies = data['movies']
     markup, _ = movie_buttons(movies, page)
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=markup)
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith('premiere_page_'))
+def handle_premiere_page(call):
+    parts = call.data.split('_')
+    year = parts[2]
+    page = int(parts[3])
+    
+    data = premiere_data.get(call.message.chat.id)
+    if not data:
+        bot.answer_callback_query(call.id, "❌ Устарело")
+        return
+    
+    movies = data['movies']
+    total_pages = (len(movies) + 9) // 10
+    markup, _ = premiere_buttons(movies, year, page, total_pages)
+    bot.edit_message_text(f"🎬 *Премьеры 2025-2026* (стр. {page+1}/{total_pages})", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith('movie_'))
 def show_movie(call):
     movie_id = int(call.data.split('_')[1])
-    bot.answer_callback_query(call.id, "📽 Загружаю...")
+    bot.answer_callback_query(call.id, "📽 Загружаю информацию...")
     
     movie = get_movie_by_id(movie_id)
     if not movie:
-        bot.send_message(call.message.chat.id, "❌ Ошибка загрузки фильма.")
+        bot.send_message(call.message.chat.id, "❌ Не удалось загрузить информацию о фильме.")
         return
     
     name = movie.get('nameRu') or movie.get('nameEn', 'Без названия')
@@ -279,24 +321,61 @@ def show_movie(call):
     rating = movie.get('ratingKinopoisk', 0)
     description = movie.get('description', 'Описание отсутствует')
     genres = ', '.join([g['genre'] for g in movie.get('genres', [])])
+    actors = [a['nameRu'] for a in movie.get('actors', [])[:5]]
+    actors_text = ', '.join(actors) if actors else 'Неизвестны'
     poster = movie.get('posterUrl')
     
-    # Преобразуем рейтинг в звёзды
-    stars = int((rating / 2) + 0.5) if rating > 0 else 0
-    stars_text = '⭐' * stars if stars > 0 else 'Нет рейтинга'
-    
-    # Ссылка на бесплатный просмотр
+    stars = get_stars(rating)
     watch_link = get_watch_link(name)
     
     text = f"🎬 *{name}* ({year})\n\n"
-    text += f"⭐ *Рейтинг:* {rating}/10 ({stars_text})\n"
+    text += f"⭐ *Рейтинг:* {rating}/10 {stars}\n"
     if genres:
-        text += f"🎭 *Жанр:* {genres}\n\n"
-    text += f"📖 *Описание:*\n{description[:400]}...\n\n"
+        text += f"🎭 *Жанр:* {genres}\n"
+    text += f"🎭 *Актёры:* {actors_text}\n\n"
+    text += f"📖 *Описание:*\n{description[:500]}...\n\n"
     text += f"🔗 *Смотреть бесплатно:* [Кинопоиск]({watch_link})"
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🔙 Назад к списку", callback_data="back_to_list"))
+    
+    if poster:
+        bot.send_photo(call.message.chat.id, poster, caption=text, reply_markup=markup, parse_mode='Markdown')
+    else:
+        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='Markdown')
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('premiere_'))
+def show_premiere_movie(call):
+    movie_id = int(call.data.split('_')[1])
+    bot.answer_callback_query(call.id, "📽 Загружаю информацию...")
+    
+    movie = get_movie_by_id(movie_id)
+    if not movie:
+        bot.send_message(call.message.chat.id, "❌ Не удалось загрузить информацию о фильме.")
+        return
+    
+    name = movie.get('nameRu') or movie.get('nameEn', 'Без названия')
+    year = movie.get('year', '—')
+    rating = movie.get('ratingKinopoisk', 0)
+    description = movie.get('description', 'Описание отсутствует')
+    genres = ', '.join([g['genre'] for g in movie.get('genres', [])])
+    actors = [a['nameRu'] for a in movie.get('actors', [])[:5]]
+    actors_text = ', '.join(actors) if actors else 'Неизвестны'
+    poster = movie.get('posterUrl')
+    
+    stars = get_stars(rating)
+    watch_link = get_watch_link(name)
+    
+    text = f"🎬 *{name}* ({year})\n\n"
+    text += f"⭐ *Рейтинг:* {rating}/10 {stars}\n"
+    if genres:
+        text += f"🎭 *Жанр:* {genres}\n"
+    text += f"🎭 *Актёры:* {actors_text}\n\n"
+    text += f"📖 *Описание:*\n{description[:500]}...\n\n"
+    text += f"🔗 *Смотреть бесплатно:* [Кинопоиск]({watch_link})"
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🔙 Назад к премьерам", callback_data="back_to_premieres"))
     
     if poster:
         bot.send_photo(call.message.chat.id, poster, caption=text, reply_markup=markup, parse_mode='Markdown')
@@ -311,7 +390,18 @@ def back_to_list(call):
         return
     movies = data['movies']
     markup, _ = movie_buttons(movies, 0)
-    bot.edit_message_text(f"🎬 *Результаты:* {data['query']}", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+    bot.edit_message_text(f"🎬 *Результаты поиска:* {data['query']}", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+@bot.callback_query_handler(func=lambda call: call.data == "back_to_premieres")
+def back_to_premieres(call):
+    data = premiere_data.get(call.message.chat.id)
+    if not data:
+        bot.answer_callback_query(call.id, "❌ Устарело")
+        return
+    movies = data['movies']
+    total_pages = (len(movies) + 9) // 10
+    markup, _ = premiere_buttons(movies, '2025-2026', 0, total_pages)
+    bot.edit_message_text(f"🎬 *Премьеры 2025-2026* (стр. 1/{total_pages})", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
 # ========== РЕФЕРАЛЬНЫЕ КНОПКИ ==========
 @bot.callback_query_handler(func=lambda call: call.data == "ref_create")
